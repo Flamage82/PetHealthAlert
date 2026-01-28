@@ -1,0 +1,8 @@
+## Interface: 120000
+## Title: Pet Health Alert
+## Notes: Displays a pet health bar and flashes a warning when pet health drops below a configurable threshold. Works with 12.0 secret values.
+## Author: Flamage
+## Version: 1.0.0
+## SavedVariables: PetHealthAlertDB
+
+PetHealthAlert.lua
