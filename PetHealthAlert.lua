@@ -225,7 +225,8 @@ local function UpdateHealthBar()
         -- Pet hunter with no pet in combat or targeting hostile → pet is dead
         local showDeath = IsPetHunter()
             and (UnitAffectingCombat("player")
-              or (UnitExists("target") and UnitCanAttack("player", "target")))
+              or (UnitExists("target") and UnitCanAttack("player", "target"))
+              or UnitExists("softenemy"))
         deathOverlay:SetAlpha(showDeath and 1 or 0)
         return
     end
@@ -353,6 +354,7 @@ local function OnEvent(self, event, ...)
         or event == "PLAYER_REGEN_DISABLED"
         or event == "PLAYER_REGEN_ENABLED"
         or event == "PLAYER_TARGET_CHANGED"
+        or event == "PLAYER_SOFT_ENEMY_CHANGED"
         or event == "PLAYER_SPECIALIZATION_CHANGED"
         or event == "TRAIT_CONFIG_UPDATED" then
         UpdateHealthBar()
@@ -369,6 +371,7 @@ eventFrame:RegisterEvent("UNIT_PET")
 eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
+eventFrame:RegisterEvent("PLAYER_SOFT_ENEMY_CHANGED")
 eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 eventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
 eventFrame:RegisterUnitEvent("UNIT_HEALTH", "pet")
