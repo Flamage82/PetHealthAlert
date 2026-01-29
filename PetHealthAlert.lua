@@ -215,6 +215,17 @@ local function IsPetHunter()
     return false
 end
 
+-- Returns true when the player is in a state where their pet
+-- is expected to be dismissed (mounted, in a vehicle, etc.)
+local function IsPetExpectedAbsent()
+    return IsMounted()
+        or UnitOnTaxi("player")
+        or UnitInVehicle("player")
+        or HasVehicleActionBar()
+        or HasOverrideActionBar()
+        or UnitIsDeadOrGhost("player")
+end
+
 ----------------------------------------------------------------------
 -- Health update (safe with secret values)
 ----------------------------------------------------------------------
@@ -223,7 +234,9 @@ local function UpdateHealthBar()
         container:Hide()
         alertFrame:SetAlpha(0)
         -- Pet hunter with no pet in combat or targeting hostile → pet is dead
+        -- Suppress when the pet is expected to be dismissed (mounted, vehicle, etc.)
         local showDeath = IsPetHunter()
+            and not IsPetExpectedAbsent()
             and (UnitAffectingCombat("player")
               or (UnitExists("target") and UnitCanAttack("player", "target"))
               or UnitExists("softenemy"))
