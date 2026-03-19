@@ -4,7 +4,8 @@ local addonName, ns = ...
 -- Defaults
 ----------------------------------------------------------------------
 local defaults = {
-    threshold = 0.5,
+    threshold = 0.4,
+    mendThreshold = 0.7,
     locked = true,
     position = {
         point = "CENTER",
@@ -21,6 +22,8 @@ local db
 ----------------------------------------------------------------------
 local BAR_WIDTH = 150
 local BAR_HEIGHT = 16
+local MEND_PET_SPELL_ID = 136
+local MEND_PET_COOLDOWN = 10
 
 ----------------------------------------------------------------------
 -- Curves (rebuilt when threshold changes)
@@ -29,6 +32,7 @@ local colorCurve      -- ColorCurve: red → yellow → green based on health %
 local alertCurve      -- Curve: outputs 1.0 below threshold, 0.0 at/above
 local visibilityCurve -- Curve: outputs 1.0 below 100%, 0.0 at full health
 local deathCurve      -- Curve: outputs 1.0 at ~0% health, 0.0 above
+local mendPetCurve    -- Curve: outputs 1.0 below 70%, 0.0 at/above
 
 local function BuildCurves()
     -- Linear color gradient: red at 0%, yellow at 30%, green at 70%+
@@ -55,6 +59,12 @@ local function BuildCurves()
     deathCurve:SetType(Enum.LuaCurveType.Step)
     deathCurve:AddPoint(0.0, 1.0)    -- at 0% → alpha 1 (dead)
     deathCurve:AddPoint(0.005, 0.0)  -- above ~0% → alpha 0 (alive)
+
+    -- Mend Pet reminder: visible below 70%, hidden at/above
+    mendPetCurve = C_CurveUtil.CreateCurve()
+    mendPetCurve:SetType(Enum.LuaCurveType.Step)
+    mendPetCurve:AddPoint(0.0, 1.0)                 -- below threshold → visible
+    mendPetCurve:AddPoint(db.mendThreshold, 0.0)    -- at/above threshold → hidden
 end
 
 ----------------------------------------------------------------------
@@ -66,6 +76,7 @@ local deathOverlay -- skull + text shown when pet is dead
 local alertFrame   -- fullscreen red vignette, alpha-driven by alertCurve
 local dragHandle   -- shown when unlocked for repositioning
 local petLabel     -- "Pet" text centered on the bar
+local mendPetIcon  -- Mend Pet reminder icon, shown when available and pet is hurt
 
 local function CreateUI()
     ----------------------------------------------------------------
@@ -180,6 +191,29 @@ local function CreateUI()
     ag:Play()
 
     ----------------------------------------------------------------
+    -- Mend Pet reminder icon (to the right of the health bar)
+    ----------------------------------------------------------------
+    mendPetIcon = CreateFrame("Frame", nil, UIParent)
+    mendPetIcon:SetSize(36, 36)
+    mendPetIcon:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
+
+    local mendTex = mendPetIcon:CreateTexture(nil, "ARTWORK")
+    mendTex:SetAllPoints()
+    mendTex:SetTexture("Interface/Icons/Ability_Hunter_MendPet")
+    mendTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    local mendBorder = CreateFrame("Frame", nil, mendPetIcon, "BackdropTemplate")
+    mendBorder:SetPoint("TOPLEFT", -1, 1)
+    mendBorder:SetPoint("BOTTOMRIGHT", 1, -1)
+    mendBorder:SetBackdrop({
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        edgeSize = 8,
+    })
+    mendBorder:SetBackdropBorderColor(0.3, 0.8, 0.3, 1)
+
+    mendPetIcon:Hide()
+
+    ----------------------------------------------------------------
     -- Drag handle (visible when unlocked)
     ----------------------------------------------------------------
     dragHandle = CreateFrame("Frame", nil, container)
@@ -227,9 +261,39 @@ local function IsPetExpectedAbsent()
 end
 
 ----------------------------------------------------------------------
+-- Mend Pet cooldown tracking (avoids secret-value restrictions)
+----------------------------------------------------------------------
+local mendPetOnCooldown = false
+
+local function UpdateMendPetIcon()
+    if not mendPetIcon then return end
+    if not UnitExists("pet")
+        or UnitIsDeadOrGhost("pet")
+        or not IsPlayerSpell(MEND_PET_SPELL_ID)
+        or mendPetOnCooldown then
+        mendPetIcon:Hide()
+        return
+    end
+
+    mendPetIcon:Show()
+    local mendAlpha = UnitHealthPercent("pet", true, mendPetCurve)
+    mendPetIcon:SetAlpha(mendAlpha)
+end
+
+local function OnMendPetCast()
+    mendPetOnCooldown = true
+    UpdateMendPetIcon()
+    C_Timer.After(MEND_PET_COOLDOWN, function()
+        mendPetOnCooldown = false
+        UpdateMendPetIcon()
+    end)
+end
+
+----------------------------------------------------------------------
 -- Health update (safe with secret values)
 ----------------------------------------------------------------------
 local function UpdateHealthBar()
+    if not container then return end
     if not UnitExists("pet") then
         container:Hide()
         alertFrame:SetAlpha(0)
@@ -265,6 +329,9 @@ local function UpdateHealthBar()
     -- Vignette visibility: secret alpha (1.0 below threshold, 0.0 above)
     local alertAlpha = UnitHealthPercent("pet", true, alertCurve)
     alertFrame:SetAlpha(alertAlpha)
+
+    -- Mend Pet reminder
+    UpdateMendPetIcon()
 end
 
 ----------------------------------------------------------------------
@@ -312,6 +379,16 @@ local function HandleSlashCommand(msg)
         else
             print("|cff00ccffPetHealthAlert:|r Usage: /pha threshold 50  (value between 1-99)")
         end
+    elseif cmd == "mend" then
+        local pct = tonumber(arg)
+        if pct and pct > 0 and pct < 100 then
+            db.mendThreshold = pct / 100
+            BuildCurves()
+            UpdateHealthBar()
+            print("|cff00ccffPetHealthAlert:|r Mend Pet threshold set to " .. pct .. "%.")
+        else
+            print("|cff00ccffPetHealthAlert:|r Usage: /pha mend 70  (value between 1-99)")
+        end
     elseif cmd == "reset" then
         db.position = CopyTable(defaults.position)
         RestorePosition()
@@ -321,7 +398,8 @@ local function HandleSlashCommand(msg)
         print("  /pha lock        - Lock frame position")
         print("  /pha unlock      - Unlock frame for dragging")
         print("  /pha toggle      - Toggle lock state")
-        print("  /pha threshold # - Set alert threshold (1-99, default 50)")
+        print("  /pha threshold # - Set alert threshold (1-99, default 40)")
+        print("  /pha mend #      - Set Mend Pet reminder threshold (1-99, default 70)")
         print("  /pha reset       - Reset position to default")
     end
 end
@@ -349,6 +427,7 @@ local function OnEvent(self, event, ...)
             end
         end
 
+
         BuildCurves()
         CreateUI()
         RestorePosition()
@@ -374,6 +453,12 @@ local function OnEvent(self, event, ...)
 
     elseif event == "UNIT_HEALTH" then
         UpdateHealthBar()
+
+    elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+        local _, _, spellID = ...
+        if spellID == MEND_PET_SPELL_ID then
+            OnMendPetCast()
+        end
     end
 end
 
@@ -388,4 +473,5 @@ eventFrame:RegisterEvent("PLAYER_SOFT_ENEMY_CHANGED")
 eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 eventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
 eventFrame:RegisterUnitEvent("UNIT_HEALTH", "pet")
+eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
 eventFrame:SetScript("OnEvent", OnEvent)
